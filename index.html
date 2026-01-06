@@ -5,57 +5,40 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lianjia AI Visual Studio | 视觉工作站</title>
-    
-    <!-- 1. 基础字体与重置 -->
+    <!-- 基础字体 -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-    
-    <!-- 2. Tailwind 运行时引擎 (确保即便环境构建失败，UI 也能正常显示) -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            colors: {
-              lianjia: {
-                DEFAULT: '#00AE66',
-                dark: '#009657',
-                light: '#E6F7F0',
-              },
-              slate: {
-                900: '#0F172A',
-              }
-            },
-            borderRadius: {
-              '4xl': '2rem',
-              '5xl': '2.5rem',
-            }
-          }
-        }
+    <style>
+      /* 基础重置，防止 JS 加载前的闪烁 */
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background-color: #F8F9FA;
+        overflow: hidden;
       }
-    </script>
-
-    <style type="text/tailwindcss">
-      @layer base {
-        html, body {
-          @apply m-0 p-0 w-full h-full bg-[#F8F9FA] overflow-hidden antialiased;
-          font-family: 'Inter', system-ui, sans-serif;
-        }
-        #root { @apply w-full h-full; }
-      }
+      #root { width: 100%; height: 100%; }
       
-      /* 自定义滚动条 */
-      ::-webkit-scrollbar { width: 5px; }
-      ::-webkit-scrollbar-track { background: transparent; }
-      ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
-      
-      .init-loader {
-        @apply fixed inset-0 flex flex-col items-center justify-center gap-5 bg-white z-[9999];
+      /* 启动状态指示 */
+      .boot-loader {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #FFFFFF;
+        z-index: 100;
       }
-      .spinner {
-        @apply w-10 h-10 border-4 border-slate-100 border-t-lianjia rounded-full;
-        animation: spin 0.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+      .dot-spinner {
+        width: 40px;
+        height: 40px;
+        border: 3px solid #F1F5F9;
+        border-top-color: #00AE66;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
       }
       @keyframes spin { to { transform: rotate(360deg); } }
     </style>
@@ -75,12 +58,11 @@
 </head>
 <body>
     <div id="root">
-      <div class="init-loader">
-        <div class="spinner"></div>
-        <div class="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Lianjia Studio Loading</div>
+      <div class="boot-loader">
+        <div class="dot-spinner"></div>
       </div>
     </div>
-    <!-- Vite 入口，使用 ./ 确保相对路径正确 -->
-    <script type="module" src="./index.tsx"></script>
+    <!-- 关键：Vite 标准入口路径 -->
+    <script type="module" src="/index.tsx"></script>
 </body>
 </html>
