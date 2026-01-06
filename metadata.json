@@ -1,7 +1,5 @@
 {
-  "name": "上海链家系统",
-  "description": "基于领域驱动设计(DDD)的剧本创作平台，旨在锁定角色视觉身份并确保跨镜头的一致性生产。",
-  "requestFramePermissions": [
-    "camera"
-  ]
+  "name": "Lianjia AI Visual Studio",
+  "description": "链家视频生产资产管理系统：剧本结构化与角色一致性中心。",
+  "requestFramePermissions": []
 }

@@ -1,578 +1,319 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
+import { useProductionEngine } from './application/useProductionEngine';
 import { 
-  Users, 
-  Film, 
-  Plus, 
-  Lock, 
-  Unlock, 
-  RefreshCw, 
-  Send, 
-  Play, 
-  CheckCircle2, 
-  AlertCircle,
-  ChevronRight,
-  Database,
-  Image as ImageIcon,
-  Layout
+  MonitorPlay, Sparkles, Terminal, 
+  Camera, Play, UserCheck, 
+  RefreshCw, Building2, ChevronRight, HardDriveDownload,
+  FileText, Layout, Layers, Settings
 } from 'lucide-react';
-import { 
-  Character, 
-  Shot, 
-  Project, 
-  AssetStatus, 
-  ShotStatus, 
-  Scene 
-} from './types';
-import * as gemini from './services/geminiService';
-
-const MOCK_SCRIPT = `（场景：豪华别墅 室内 日）
-业主李先生焦急地在客厅踱步。
-经纪人小王推门而入，手里拿着一份秘密报价单。
-小王：（低声）“有人在暗中竞价，我们要快。”
-李先生皱起眉头，看着窗外的草坪。`;
+import { AssetStatus, ShotStatus } from './domain/models';
 
 const App: React.FC = () => {
-  const [project, setProject] = useState<Project | null>(null);
-  const [activeTab, setActiveTab] = useState<'script' | 'casting' | 'production'>('script');
-  const [scriptInput, setScriptInput] = useState(MOCK_SCRIPT);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { project, isWorking, logs, startNewProject, lockAsset, produceShotFrame, reset } = useProductionEngine();
+  const [activeTab, setActiveTab] = useState<'blueprint' | 'production'>('blueprint');
+  const [scriptInput, setScriptInput] = useState('');
 
-  // Persistence (Simulated)
-  useEffect(() => {
-    const saved = localStorage.getItem('current_project');
-    if (saved) {
-      try {
-        setProject(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to load project", e);
-      }
-    }
-  }, []);
+  const SCRIPT_TEMPLATES = [
+    { title: "新房推介", content: "经纪人小王带客户参观滨江壹号院。镜头从小王在门口迎接开始，然后是客厅全景，展示无敌江景。小王详细讲解智能家居系统。" },
+    { title: "服务日常", content: "清晨，经纪人张姐走进绿城门店。她整理领带，拿起iPad查看新房源。随后她在会议室与团队讨论最新市场数据。" }
+  ];
 
-  useEffect(() => {
-    if (project) {
-      localStorage.setItem('current_project', JSON.stringify(project));
-    }
-  }, [project]);
-
-  const handleCreateProject = () => {
-    const newProject: Project = {
-      id: Date.now().toString(),
-      title: '未命名项目',
-      scriptText: '',
-      characters: [],
-      shots: [],
-      scenes: []
-    };
-    setProject(newProject);
-    setActiveTab('script');
-  };
-
-  const handleAnalyzeScript = async () => {
-    if (!project) return;
-    setIsProcessing(true);
-    setError(null);
-    try {
-      const charData = await gemini.extractCharacters(scriptInput);
-      const characters: Character[] = charData.map((c, idx) => ({
-        id: `char_${Date.now()}_${idx}`,
-        name: c.name || 'Unknown',
-        roleInStory: c.roleInStory || '',
-        coreTraits: c.coreTraits || [],
-        taboos: c.taboos || [],
-        look: {
-          status: AssetStatus.DRAFT,
-          seedPrompt: '',
-          consistencyTags: []
-        }
-      }));
-
-      const { shots, scenes } = await gemini.breakdownShots(scriptInput, characters);
+  // 1. 欢迎页
+  if (!project) return (
+    <div className="fixed inset-0 w-full h-full bg-[#F8F9FA] flex flex-col items-center justify-center p-6 text-slate-900 overflow-hidden">
+      <div className="w-24 h-24 bg-lianjia rounded-[2.5rem] flex items-center justify-center text-white shadow-2xl shadow-emerald-200/50 mb-10 animate-in zoom-in duration-700">
+        <MonitorPlay size={44} strokeWidth={2.5} />
+      </div>
       
-      const domainShots: Shot[] = shots.map((s: any, idx: number) => ({
-        ...s,
-        id: `shot_${Date.now()}_${idx}`,
-        status: ShotStatus.PENDING
-      }));
-
-      setProject({
-        ...project,
-        scriptText: scriptInput,
-        characters,
-        shots: domainShots,
-        scenes: scenes as Scene[]
-      });
-      setActiveTab('casting');
-    } catch (err: any) {
-      setError(err.message || '分析失败');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleLockCharacter = async (charId: string) => {
-    if (!project) return;
-    const char = project.characters.find(c => c.id === charId);
-    if (!char) return;
-
-    setIsProcessing(true);
-    try {
-      const imageUrl = await gemini.generateCharacterLook(char);
-      const updatedChars = project.characters.map(c => 
-        c.id === charId 
-          ? { 
-              ...c, 
-              look: { 
-                ...c.look, 
-                status: AssetStatus.LOCKED, 
-                refImageUrl: imageUrl,
-                seedPrompt: `Consistent visual identity for ${c.name}: ${c.coreTraits.join(", ")}, strictly following: ${c.taboos.join(", ")}`
-              } 
-            } 
-          : c
-      );
-      setProject({ ...project, characters: updatedChars });
-    } catch (err: any) {
-      setError(`锁定形象失败: ${err.message}`);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleGenerateShot = async (shotId: string) => {
-    if (!project) return;
-    const shot = project.shots.find(s => s.id === shotId);
-    if (!shot) return;
-
-    // 检查角色是否锁定
-    const allLocked = shot.casting.every(cast => {
-      const char = project.characters.find(c => c.id === cast.characterId);
-      return char?.look.status === AssetStatus.LOCKED;
-    });
-
-    if (!allLocked && !confirm("部分角色尚未锁定视觉身份，生成结果可能不一致。是否继续？")) return;
-
-    // 更新状态为生成中
-    setProject(prev => {
-      if (!prev) return null;
-      return {
-        ...prev,
-        shots: prev.shots.map(s => s.id === shotId ? { ...s, status: ShotStatus.GENERATING } : s)
-      };
-    });
-
-    try {
-      const scene = project.scenes.find(sc => sc.id === shot.sceneId) || { id: 'unknown', type: '室内', description: '未知场景' };
-      const imageUrl = await gemini.generateShotImage(shot, scene, project.characters);
+      <div className="text-center mb-12">
+        <h1 className="text-4xl font-[900] tracking-tighter mb-4">Lianjia <span className="text-lianjia">AI</span> Studio</h1>
+        <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.4em]">Industrial Video Asset Consistency Center</p>
+      </div>
       
-      setProject(prev => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          shots: prev.shots.map(s => s.id === shotId ? { ...s, status: ShotStatus.COMPLETED, imageUrl } : s)
-        };
-      });
-    } catch (err: any) {
-      setProject(prev => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          shots: prev.shots.map(s => s.id === shotId ? { ...s, status: ShotStatus.FAILED } : s)
-        };
-      });
-      setError(`镜头生成失败: ${err.message}`);
-    }
-  };
+      <div className="w-full max-w-2xl bg-white border border-slate-200/60 rounded-[3rem] p-10 shadow-2xl shadow-slate-200/20">
+        <div className="flex gap-2 mb-8 bg-slate-50 p-1.5 rounded-2xl border border-slate-100">
+          {SCRIPT_TEMPLATES.map((t, i) => (
+            <button 
+              key={i} 
+              onClick={() => setScriptInput(t.content)} 
+              className="flex-1 py-3 px-4 rounded-xl text-[11px] font-black transition-all hover:bg-white hover:text-lianjia text-slate-400 uppercase tracking-wider"
+            >
+              {t.title}
+            </button>
+          ))}
+        </div>
+
+        <div className="relative mb-8">
+          <textarea 
+            className="w-full h-48 p-8 bg-slate-50/50 border-2 border-slate-100 rounded-[2rem] focus:border-lianjia/20 focus:bg-white text-slate-700 text-base font-medium leading-relaxed transition-all outline-none resize-none placeholder:text-slate-200"
+            placeholder="在此粘贴剧本或使用上方模板..."
+            value={scriptInput}
+            onChange={(e) => setScriptInput(e.target.value)}
+          />
+        </div>
+
+        <button 
+          onClick={() => startNewProject(scriptInput)}
+          disabled={!scriptInput || isWorking}
+          className="w-full py-5 bg-lianjia text-white font-black text-sm rounded-2xl shadow-xl shadow-emerald-200 hover:bg-lianjia-dark transition-all disabled:opacity-50 flex items-center justify-center gap-3 uppercase tracking-[0.2em] active:scale-[0.98]"
+        >
+          {isWorking ? <RefreshCw className="animate-spin" size={20}/> : <Sparkles size={20}/>}
+          解析剧本蓝图
+        </button>
+      </div>
+      
+      <p className="mt-12 text-[9px] font-black text-slate-300 uppercase tracking-[0.4em]">Professional Workflow Architecture</p>
+    </div>
+  );
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50">
-      {/* Sidebar */}
-      <div className="w-64 bg-slate-900 text-white flex flex-col">
-        <div className="p-6 border-b border-slate-800 flex items-center gap-3">
-          <Film className="w-6 h-6 text-indigo-400" />
-          <h1 className="font-bold text-lg">剧本一致性系统</h1>
+    <div className="flex h-screen w-full bg-[#F8F9FA] overflow-hidden text-slate-900">
+      {/* 侧边导航 */}
+      <aside className="w-24 bg-white border-r border-slate-100 flex flex-col items-center py-10 gap-10 shrink-0">
+        <div className="w-12 h-12 bg-lianjia rounded-2xl text-white flex items-center justify-center shadow-lg shadow-emerald-100 mb-8">
+          <Layout size={24} strokeWidth={2.5}/>
         </div>
         
-        <nav className="flex-1 p-4 space-y-2 overflow-y-auto custom-scrollbar">
-          <button 
-            onClick={handleCreateProject}
-            className="w-full flex items-center gap-3 px-4 py-3 bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-all"
-          >
-            <Plus className="w-4 h-4" />
-            新建项目
-          </button>
-          
-          <div className="pt-6">
-            <p className="text-xs uppercase text-slate-500 font-bold mb-3 px-4">项目列表</p>
-            {project && (
-              <button className="w-full text-left px-4 py-3 bg-slate-800 rounded-xl border-l-4 border-indigo-500 flex items-center justify-between group">
-                <span className="truncate">{project.title}</span>
-                <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-white transition-colors" />
-              </button>
-            )}
-          </div>
-        </nav>
-
-        <div className="p-4 bg-slate-800/50">
-          <div className="flex items-center gap-3 text-sm text-slate-400">
-            <Database className="w-4 h-4" />
-            <span>存储: LocalStorage</span>
-          </div>
+        <div className="flex flex-col gap-8">
+          <SideBtn icon={<Layers size={20}/>} active={activeTab === 'blueprint'} onClick={() => setActiveTab('blueprint')} label="资产" />
+          <SideBtn icon={<MonitorPlay size={20}/>} active={activeTab === 'production'} onClick={() => setActiveTab('production')} label="排产" />
         </div>
-      </div>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {!project ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
-            <div className="w-24 h-24 bg-indigo-100 rounded-full flex items-center justify-center mb-6">
-              {/* Fix: Changed localized string 'फिल्म' to imported component 'Film' */}
-              <Film className="w-12 h-12 text-indigo-600" />
+        <div className="mt-auto">
+          <SideBtn icon={<Settings size={20}/>} active={false} onClick={() => {}} label="设置" />
+        </div>
+      </aside>
+
+      {/* 主工作区 */}
+      <main className="flex-1 flex flex-col overflow-hidden">
+        <header className="h-20 px-10 flex items-center justify-between bg-white border-b border-slate-100 shrink-0 z-10">
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 bg-lianjia rounded-full animate-pulse shadow-[0_0_8px_#00AE66]" />
+              <h2 className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-900">
+                {activeTab === 'blueprint' ? 'Visual Asset Blueprint' : 'Production Pipeline'}
+              </h2>
             </div>
-            <h2 className="text-3xl font-bold text-slate-800 mb-2">欢迎使用一致性创作系统</h2>
-            <p className="text-slate-500 max-w-md mb-8">
-              锁定角色身份，确保跨镜头视觉统一。支持 Gemini 驱动的精准提取与高质量出图。
-            </p>
-            <button 
-              onClick={handleCreateProject}
-              className="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-lg shadow-indigo-200 transition-all font-semibold"
-            >
-              点击此处开始第一个项目
-            </button>
+            <div className="h-4 w-[1px] bg-slate-200" />
+            <span className="text-[10px] font-black text-lianjia bg-emerald-50 px-4 py-1.5 rounded-full border border-emerald-100 uppercase tracking-widest">
+              {project.title}
+            </span>
           </div>
-        ) : (
-          <>
-            {/* Header Tabs */}
-            <header className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between">
-              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
-                <TabButton 
-                  active={activeTab === 'script'} 
-                  onClick={() => setActiveTab('script')}
-                  icon={<Send className="w-4 h-4" />}
-                  label="1. 剧本输入"
-                />
-                <TabButton 
-                  active={activeTab === 'casting'} 
-                  onClick={() => setActiveTab('casting')}
-                  icon={<Users className="w-4 h-4" />}
-                  label="2. 选角锁定"
-                />
-                <TabButton 
-                  active={activeTab === 'production'} 
-                  onClick={() => setActiveTab('production')}
-                  icon={<Layout className="w-4 h-4" />}
-                  label="3. 镜头生产"
-                />
-              </div>
-              
-              <div className="flex items-center gap-4">
-                {isProcessing && (
-                  <div className="flex items-center gap-2 text-indigo-600 text-sm font-medium animate-pulse">
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>AI 处理中...</span>
-                  </div>
-                )}
-                {error && (
-                  <div className="flex items-center gap-2 text-red-500 text-sm font-medium">
-                    <AlertCircle className="w-4 h-4" />
-                    <span>{error}</span>
-                  </div>
-                )}
-              </div>
-            </header>
+          
+          <button 
+            onClick={() => {reset(); window.location.reload();}} 
+            className="group flex items-center gap-2 text-[9px] font-black text-slate-300 hover:text-rose-500 transition-all uppercase tracking-widest"
+          >
+            <RefreshCw size={12} className="group-hover:rotate-180 transition-all duration-700" />
+            Reset Session
+          </button>
+        </header>
 
-            {/* Viewport */}
-            <main className="flex-1 overflow-y-auto p-8 custom-scrollbar">
-              {activeTab === 'script' && (
-                <div className="max-w-4xl mx-auto space-y-6">
-                  <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-                    <label className="block text-sm font-bold text-slate-700 mb-4 uppercase tracking-wider">
-                      导入创作剧本 (Markdown 或 文本)
-                    </label>
-                    <textarea 
-                      value={scriptInput}
-                      onChange={(e) => setScriptInput(e.target.value)}
-                      placeholder="输入一段剧本文字，AI 将自动分析角色与镜头..."
-                      className="w-full h-80 p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none font-mono text-sm leading-relaxed"
-                    />
-                    <div className="mt-6 flex justify-end">
+        <div className="flex-1 overflow-y-auto p-12 bg-[#FBFBFB]">
+          {activeTab === 'blueprint' ? (
+            <div className="max-w-7xl mx-auto space-y-20 animate-in fade-in duration-700">
+              {/* 角色一致性 */}
+              <section>
+                <div className="flex items-center gap-3 mb-10">
+                  <UserCheck className="text-lianjia" size={22}/>
+                  <h3 className="font-black text-[10px] uppercase tracking-[0.3em] text-slate-400">Consistency Character Anchors</h3>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+                  {project.characters.map(c => (
+                    <div key={c.id} className="bg-white rounded-[2.5rem] border border-slate-100 overflow-hidden shadow-sm hover:shadow-2xl hover:shadow-emerald-900/5 transition-all group">
+                      <div className="aspect-[3/4] bg-slate-50 relative overflow-hidden">
+                        {c.refImageUrl ? (
+                          <img src={c.refImageUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
+                        ) : (
+                          <div className="w-full h-full flex flex-col items-center justify-center text-slate-200 gap-4">
+                            <UserCheck size={48} strokeWidth={1}/>
+                            <span className="text-[8px] font-black uppercase tracking-[0.2em] opacity-40">Awaiting Lock</span>
+                          </div>
+                        )}
+                        <button 
+                          onClick={() => lockAsset('char', c.id)} 
+                          className="absolute bottom-6 right-6 p-4 bg-lianjia text-white rounded-2xl shadow-2xl opacity-0 translate-y-3 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 hover:bg-lianjia-dark"
+                        >
+                          <Camera size={20}/>
+                        </button>
+                      </div>
+                      <div className="p-8">
+                        <div className="flex items-center justify-between mb-4">
+                          <span className="font-black text-base text-slate-900">{c.name}</span>
+                          <span className={`text-[9px] font-black px-3 py-1 rounded-full border ${c.status === AssetStatus.LOCKED ? 'bg-emerald-50 text-lianjia border-emerald-100' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>
+                            {c.status}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {c.coreTraits.map((t, i) => (
+                            <span key={i} className="text-[9px] font-black text-slate-400 bg-slate-50 px-3 py-1 rounded-lg border border-slate-100">#{t}</span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              {/* 空间建模 */}
+              <section>
+                <div className="flex items-center gap-3 mb-10">
+                  <Building2 className="text-lianjia" size={22}/>
+                  <h3 className="font-black text-[10px] uppercase tracking-[0.3em] text-slate-400">Spatial Identity Modeling</h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
+                  {project.locations.map(l => (
+                    <div key={l.id} className="bg-white rounded-[3rem] border border-slate-100 overflow-hidden shadow-sm hover:shadow-2xl hover:shadow-emerald-900/5 transition-all flex flex-col group">
+                      <div className="aspect-video bg-slate-50 relative overflow-hidden">
+                        {l.refImageUrl ? (
+                          <img src={l.refImageUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-slate-200">
+                            <Building2 size={48} strokeWidth={1}/>
+                          </div>
+                        )}
+                        <button 
+                          onClick={() => lockAsset('loc', l.id)} 
+                          className="absolute inset-0 m-auto w-14 h-14 bg-white/95 backdrop-blur rounded-2xl shadow-2xl opacity-0 group-hover:opacity-100 transition-all duration-300 text-lianjia flex items-center justify-center hover:bg-lianjia hover:text-white"
+                        >
+                          <Camera size={22}/>
+                        </button>
+                      </div>
+                      <div className="p-10 flex-1">
+                        <div className="flex items-center justify-between mb-5">
+                          <h4 className="font-black text-lg text-slate-900 tracking-tight">{l.name}</h4>
+                          <span className="text-[9px] font-black text-slate-400 bg-slate-50 px-3 py-1 rounded-lg border border-slate-100 uppercase">{l.type}</span>
+                        </div>
+                        <div className="space-y-2.5">
+                          {l.subAreas.map(sa => (
+                            <div key={sa.id} className="flex items-center justify-between p-4 bg-slate-50/50 rounded-2xl text-[10px] font-black text-slate-500 border border-transparent hover:border-emerald-100 hover:bg-emerald-50/30 transition-all cursor-pointer group/item">
+                              <span>{sa.name}</span>
+                              <ChevronRight size={14} className="text-slate-200 group-hover/item:text-lianjia group-hover/item:translate-x-1 transition-all"/>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+          ) : (
+            <div className="max-w-6xl mx-auto space-y-12 pb-48 animate-in fade-in duration-500">
+              {project.shots.map(s => (
+                <div key={s.id} className="bg-white border border-slate-100 rounded-[3.5rem] overflow-hidden shadow-sm flex flex-col lg:flex-row h-[460px] group hover:shadow-2xl transition-all">
+                  <div className="w-full lg:w-3/5 bg-slate-900 relative overflow-hidden">
+                    {s.imageUrl ? (
+                      <img src={s.imageUrl} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center text-white/5 gap-6">
+                        <MonitorPlay size={64} strokeWidth={1} />
+                        <span className="text-[10px] font-black uppercase tracking-[0.5em]">Frame Awaiting Render</span>
+                      </div>
+                    )}
+                    
+                    {s.status === ShotStatus.GENERATING && (
+                      <div className="absolute inset-0 bg-lianjia/90 backdrop-blur-xl flex flex-col items-center justify-center gap-6 text-white z-20">
+                        <RefreshCw size={48} className="animate-spin opacity-40" strokeWidth={1.5} />
+                        <span className="font-black text-[11px] uppercase tracking-[0.4em]">Baking Asset...</span>
+                      </div>
+                    )}
+
+                    <div className="absolute top-8 left-8 z-10">
+                      <div className="px-5 py-2.5 bg-black/40 backdrop-blur-md text-white text-[10px] font-black rounded-2xl border border-white/10 uppercase tracking-widest">
+                        Shot {s.order.toString().padStart(2, '0')}
+                      </div>
+                    </div>
+
+                    <div className="absolute top-8 right-8 opacity-0 group-hover:opacity-100 transition-all z-10 translate-x-4 group-hover:translate-x-0">
                       <button 
-                        onClick={handleAnalyzeScript}
-                        disabled={isProcessing || !scriptInput.trim()}
-                        className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-xl transition-all font-bold shadow-md shadow-indigo-100"
+                        onClick={() => produceShotFrame(s.id)} 
+                        className="p-6 bg-lianjia text-white rounded-[2rem] shadow-2xl hover:bg-lianjia-dark transition-all flex items-center gap-3 font-black text-xs uppercase tracking-widest"
                       >
-                        <Play className="w-4 h-4" />
-                        分析角色与镜头链
+                        <Play size={20} fill="currentColor"/>
+                        Render Frame
                       </button>
                     </div>
                   </div>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <FeatureCard 
-                      icon={<Users className="w-6 h-6 text-blue-500" />}
-                      title="角色管线"
-                      desc="自动识别剧中人物，提取特质，生成定妆照并锁定视觉锚点。"
-                    />
-                    <FeatureCard 
-                      icon={<Layout className="w-6 h-6 text-emerald-500" />}
-                      title="镜头管线"
-                      desc="剧本拆解为结构化镜头，自动关联角色状态与场景环境。"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'casting' && (
-                <div className="max-w-6xl mx-auto">
-                  <div className="flex items-center justify-between mb-8">
-                    <div>
-                      <h2 className="text-2xl font-bold text-slate-800">角色大厅 (Casting Board)</h2>
-                      <p className="text-slate-500">点击“锁定形象”为角色生成视觉统一锚点</p>
-                    </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                    {project.characters.map(char => (
-                      <CharacterCard 
-                        key={char.id} 
-                        character={char} 
-                        onLock={() => handleLockCharacter(char.id)}
-                        loading={isProcessing}
-                      />
-                    ))}
-                    {project.characters.length === 0 && (
-                      <div className="col-span-full py-20 text-center bg-white rounded-2xl border-2 border-dashed border-slate-200">
-                        <Users className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-                        <p className="text-slate-500 font-medium">暂未识别到角色，请先分析剧本</p>
+                  <div className="flex-1 p-12 flex flex-col justify-between">
+                    <div className="space-y-10">
+                      <div className="flex items-center gap-3">
+                        <div className="w-2.5 h-2.5 rounded-full bg-lianjia shadow-[0_0_15px_rgba(0,174,102,0.6)]" />
+                        <span className="font-black text-[11px] text-lianjia uppercase tracking-widest">{s.marketingPoint}</span>
                       </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'production' && (
-                <div className="max-w-5xl mx-auto">
-                  <div className="flex items-center justify-between mb-8">
-                    <div>
-                      <h2 className="text-2xl font-bold text-slate-800">分镜生产 (Production List)</h2>
-                      <p className="text-slate-500">根据锁定的角色锚点生产各镜头画面</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-6 pb-20">
-                    {project.shots.map(shot => (
-                      <ShotItem 
-                        key={shot.id} 
-                        shot={shot} 
-                        scene={project.scenes.find(s => s.id === shot.sceneId)!}
-                        characters={project.characters}
-                        onGenerate={() => handleGenerateShot(shot.id)}
-                      />
-                    ))}
-                    {project.shots.length === 0 && (
-                      <div className="py-20 text-center bg-white rounded-2xl border-2 border-dashed border-slate-200">
-                        <Film className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-                        <p className="text-slate-500 font-medium">暂未识别到分镜，请先分析剧本</p>
+                      
+                      <div className="space-y-4">
+                        <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest block">Dialogue</span>
+                        <p className="text-xl font-bold text-slate-800 leading-relaxed italic opacity-90 border-l-4 border-emerald-500/20 pl-6">
+                          "{s.dialogue}"
+                        </p>
                       </div>
-                    )}
+
+                      <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100/50">
+                        <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest block mb-3">Visual Action</span>
+                        <p className="text-[11px] font-bold text-slate-500 leading-loose uppercase tracking-wide">
+                          {s.action}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <button className="w-full bg-slate-900 text-white py-5 rounded-2xl flex items-center justify-center gap-3 font-black text-[10px] uppercase tracking-widest hover:bg-black transition-all shadow-xl active:scale-95">
+                      <HardDriveDownload size={18} /> 
+                      Download Data
+                    </button>
                   </div>
                 </div>
-              )}
-            </main>
-          </>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// --- Helper Components ---
-
-const TabButton: React.FC<{ active: boolean, onClick: () => void, icon: React.ReactNode, label: string }> = ({ active, onClick, icon, label }) => (
-  <button 
-    onClick={onClick}
-    className={`flex items-center gap-2 px-6 py-2 rounded-lg transition-all text-sm font-semibold ${
-      active ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-    }`}
-  >
-    {icon}
-    {label}
-  </button>
-);
-
-const FeatureCard: React.FC<{ icon: React.ReactNode, title: string, desc: string }> = ({ icon, title, desc }) => (
-  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all">
-    <div className="mb-4">{icon}</div>
-    <h3 className="font-bold text-slate-800 mb-2">{title}</h3>
-    <p className="text-sm text-slate-500 leading-relaxed">{desc}</p>
-  </div>
-);
-
-const CharacterCard: React.FC<{ character: Character, onLock: () => void, loading: boolean }> = ({ character, onLock, loading }) => {
-  const isLocked = character.look.status === AssetStatus.LOCKED;
-  return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden group hover:border-indigo-200 transition-all">
-      <div className="aspect-square bg-slate-100 relative overflow-hidden">
-        {character.look.refImageUrl ? (
-          <img src={character.look.refImageUrl} alt={character.name} className="w-full h-full object-cover" />
-        ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 p-8 text-center">
-            <Users className="w-12 h-12 mb-4" />
-            <p className="text-sm font-medium">定妆照未生成</p>
-          </div>
-        )}
-        <div className="absolute top-4 right-4">
-          {isLocked ? (
-            <div className="bg-emerald-500 text-white p-2 rounded-full shadow-lg">
-              <Lock className="w-4 h-4" />
-            </div>
-          ) : (
-            <div className="bg-white/90 backdrop-blur text-slate-400 p-2 rounded-full shadow-lg">
-              <Unlock className="w-4 h-4" />
+              ))}
             </div>
           )}
         </div>
-      </div>
-      
-      <div className="p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-xl font-bold text-slate-800">{character.name}</h3>
-          <span className="text-xs px-2 py-1 bg-indigo-50 text-indigo-600 rounded-full font-bold">{character.roleInStory}</span>
+      </main>
+
+      {/* 日志面板 */}
+      <aside className="w-80 bg-[#0F1110] flex flex-col shrink-0 border-l border-white/5">
+        <div className="h-20 px-8 border-b border-white/5 flex items-center justify-between bg-black/40">
+          <div className="flex items-center gap-3 text-lianjia">
+            <Terminal size={16}/>
+            <span className="text-[10px] font-black uppercase tracking-[0.2em]">Engine Monitor</span>
+          </div>
+          <div className={`w-2 h-2 rounded-full ${isWorking ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-slate-800'}`} />
         </div>
         
-        <div className="space-y-4">
-          <div>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter block mb-2">特质锚点</span>
-            <div className="flex flex-wrap gap-2">
-              {character.coreTraits.map((t, i) => (
-                <span key={i} className="px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded-md">{t}</span>
-              ))}
+        <div className="flex-1 overflow-y-auto p-8 font-mono text-[10px] space-y-5 bg-black/10">
+          {logs.map((log) => (
+            <div key={log.id} className={`flex gap-4 leading-relaxed ${log.type === 'process' ? 'text-emerald-400' : log.type === 'error' ? 'text-rose-400' : log.type === 'success' ? 'text-white' : 'text-slate-500'}`}>
+              <span className="opacity-30 shrink-0 font-bold">[{new Date(log.id).toLocaleTimeString([], {minute:'2-digit', second:'2-digit'})}]</span>
+              <span className="break-words font-medium">{log.msg}</span>
             </div>
-          </div>
-          
-          <div>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter block mb-2">不可变禁忌</span>
-            <div className="flex flex-wrap gap-2">
-              {character.taboos.map((t, i) => (
-                <span key={i} className="px-2 py-1 bg-red-50 text-red-500 text-xs rounded-md">不可变: {t}</span>
-              ))}
-            </div>
-          </div>
+          ))}
         </div>
+      </aside>
 
-        <button 
-          onClick={onLock}
-          disabled={loading || isLocked}
-          className={`mt-6 w-full py-3 rounded-xl flex items-center justify-center gap-2 font-bold transition-all ${
-            isLocked 
-              ? 'bg-slate-100 text-slate-400 cursor-default' 
-              : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-100'
-          }`}
-        >
-          {isLocked ? (
-            <><CheckCircle2 className="w-4 h-4" /> 形象已锁定</>
-          ) : (
-            <><ImageIcon className="w-4 h-4" /> 生成定妆照并锁定</>
-          )}
-        </button>
-      </div>
+      {/* 遮罩 */}
+      {isWorking && (
+        <div className="fixed inset-0 bg-white/60 backdrop-blur-[2px] z-[100] flex flex-col items-center justify-center pointer-events-none">
+           <div className="p-10 bg-white/95 backdrop-blur-xl rounded-[3rem] shadow-2xl border border-white flex flex-col items-center gap-6">
+             <RefreshCw className="animate-spin text-lianjia" size={48} strokeWidth={2.5}/>
+             <span className="text-[10px] font-black text-slate-800 uppercase tracking-[0.4em]">Optimizing Blueprint</span>
+           </div>
+        </div>
+      )}
     </div>
   );
 };
 
-const ShotItem: React.FC<{ shot: Shot, scene: Scene, characters: Character[], onGenerate: () => void }> = ({ shot, scene, characters, onGenerate }) => {
-  const isLoading = shot.status === ShotStatus.GENERATING;
-  const isCompleted = shot.status === ShotStatus.COMPLETED;
-
-  return (
-    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden flex flex-col md:flex-row shadow-sm hover:shadow-md transition-all">
-      <div className="w-full md:w-80 aspect-video md:aspect-auto bg-slate-100 relative group overflow-hidden shrink-0">
-        {shot.imageUrl ? (
-          <img src={shot.imageUrl} alt={`Shot ${shot.order}`} className="w-full h-full object-cover" />
-        ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 p-8 text-center bg-slate-100 border-r border-slate-200">
-            {isLoading ? (
-              <div className="space-y-4 flex flex-col items-center">
-                <RefreshCw className="w-8 h-8 text-indigo-500 animate-spin" />
-                <p className="text-xs font-bold text-indigo-500 animate-pulse">正在绘制分镜图...</p>
-              </div>
-            ) : (
-              <>
-                <ImageIcon className="w-10 h-10 mb-4 opacity-20" />
-                <p className="text-sm font-medium">等待生成画面</p>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="flex-1 p-6 flex flex-col">
-        <div className="flex items-start justify-between mb-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="text-2xl font-black text-slate-200 tracking-tighter">SHOT #{shot.order}</span>
-              <span className="text-xs font-bold text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded uppercase">{shot.camera}</span>
-            </div>
-            <p className="font-bold text-slate-800">{shot.beatPurpose}</p>
-          </div>
-          
-          {!isCompleted && !isLoading && (
-            <button 
-              onClick={onGenerate}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-xs font-bold rounded-lg hover:bg-slate-800 transition-all"
-            >
-              <ImageIcon className="w-3 h-3" />
-              渲染分镜
-            </button>
-          )}
-          {isCompleted && (
-            <div className="flex items-center gap-1 text-emerald-500 text-xs font-bold">
-              <CheckCircle2 className="w-4 h-4" />
-              已出图
-            </div>
-          )}
-        </div>
-
-        <div className="flex-1 space-y-3">
-          <div className="flex gap-2 text-sm">
-            <span className="text-slate-400 font-bold shrink-0">动作:</span>
-            <span className="text-slate-600">{shot.action}</span>
-          </div>
-          {shot.dialogue && (
-            <div className="flex gap-2 text-sm italic">
-              <span className="text-indigo-400 font-bold shrink-0">台词:</span>
-              <span className="text-slate-500">“{shot.dialogue}”</span>
-            </div>
-          )}
-        </div>
-
-        <div className="mt-4 pt-4 border-t border-slate-100 flex items-center gap-4 overflow-x-auto no-scrollbar">
-          <div className="flex items-center gap-1 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100">
-            <span className="text-[10px] font-bold text-slate-400 uppercase">场景:</span>
-            <span className="text-xs font-medium text-slate-600">{scene?.type} - {scene?.description}</span>
-          </div>
-          
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold text-slate-400 uppercase">出镜:</span>
-            {shot.casting.map(cast => {
-              const char = characters.find(c => c.id === cast.characterId);
-              const isLocked = char?.look.status === AssetStatus.LOCKED;
-              return (
-                <div key={cast.characterId} className="flex items-center gap-1.5 bg-slate-50 px-2 py-1 rounded-lg border border-slate-100">
-                  <span className={`text-xs font-bold ${isLocked ? 'text-indigo-600' : 'text-slate-400'}`}>
-                    {char?.name || '未知'}
-                  </span>
-                  {isLocked ? <Lock className="w-2.5 h-2.5 text-indigo-400" /> : <Unlock className="w-2.5 h-2.5 text-slate-300" />}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
+const SideBtn: React.FC<{ icon: React.ReactNode, active: boolean, onClick: () => void, label: string }> = ({ icon, active, onClick, label }) => (
+  <button 
+    onClick={onClick} 
+    className={`flex flex-col items-center gap-3 transition-all duration-300 group ${active ? 'text-lianjia' : 'text-slate-300 hover:text-slate-500'}`}
+  >
+    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-500 ${active ? 'bg-emerald-50' : 'bg-transparent group-hover:bg-slate-50'}`}>
+      {React.isValidElement(icon) ? React.cloneElement(icon as React.ReactElement<any>, { strokeWidth: active ? 2.5 : 2 }) : icon}
     </div>
-  );
-};
+    <span className="text-[9px] font-black uppercase tracking-[0.15em]">{label}</span>
+  </button>
+);
 
 export default App;
